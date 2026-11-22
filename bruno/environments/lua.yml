@@ -1,0 +1,5 @@
+name: lua
+variables:
+  - name: mode
+    value: lua
+    description: ""

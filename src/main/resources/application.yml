@@ -1,0 +1,21 @@
+server.port: 8090   # 8080 is Adminer
+
+spring:
+  application.name: cache-lies
+  datasource:
+    url: jdbc:postgresql://localhost:5432/demo
+    username: demo
+    password: demo
+  jpa:
+    hibernate.ddl-auto: update
+    open-in-view: false
+  data.redis:
+    host: localhost
+    port: 6379   # Valkey speaks the Redis protocol; Lettuce works unchanged
+
+   # tx-outer (default, forces the failure) | default (framework tie) | cache-outer (used later, for the fix)
+
+logging.level:
+  org.springframework.orm.jpa.JpaTransactionManager: DEBUG
+  org.springframework.cache: TRACE # shows commit / rollback
+  dev.demo: INFO

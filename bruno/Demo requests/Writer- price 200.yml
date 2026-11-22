@@ -1,0 +1,23 @@
+info:
+  name: "Writer: price 200"
+  type: http
+  seq: 7
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/{{mode}}/products/1?name=Keyboard&price=200"
+  params:
+    - name: name
+      value: Keyboard
+      type: query
+    - name: price
+      value: "200"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: false

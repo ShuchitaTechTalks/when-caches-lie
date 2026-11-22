@@ -1,0 +1,5 @@
+name: aware
+variables:
+  - name: mode
+    value: aware
+    description: ""

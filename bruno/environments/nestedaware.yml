@@ -1,0 +1,5 @@
+name: nestedaware
+variables:
+  - name: mode
+    value: nestedaware
+    description: ""

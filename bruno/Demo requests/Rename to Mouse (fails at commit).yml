@@ -1,0 +1,23 @@
+info:
+  name: Rename to Mouse (fails at commit)
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/{{mode}}/products/1?name=Mouse&price=999"
+  params:
+    - name: name
+      value: Mouse
+      type: query
+    - name: price
+      value: "999"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: false

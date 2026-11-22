@@ -1,0 +1,5 @@
+name: safe
+variables:
+  - name: mode
+    value: safe
+    description: ""

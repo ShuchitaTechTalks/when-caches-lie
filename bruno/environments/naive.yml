@@ -1,0 +1,5 @@
+name: naive
+variables:
+  - name: mode
+    value: naive
+    description: ""

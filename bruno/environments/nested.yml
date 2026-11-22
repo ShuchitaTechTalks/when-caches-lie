@@ -1,0 +1,5 @@
+name: nested
+variables:
+  - name: mode
+    value: nested
+    description: ""

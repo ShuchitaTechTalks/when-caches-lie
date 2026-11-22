@@ -1,0 +1,22 @@
+# Build output (includes target/cglib-dump)
+target/
+
+# IDE and editor files
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Personal talk-prep notes, not part of the demo
+SPEAKER_SCRIPT.md
+abstract.txt
+CLAUDE.md
+
+# Local, Windows-only setup script
+demo-setup.ps1
