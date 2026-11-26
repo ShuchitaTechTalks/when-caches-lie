@@ -20,7 +20,7 @@ public class AfterCommitCache implements Cache {
     @Override public void evict(Object key)             { later("evict", key, () -> delegate.evict(key)); }
 
     private void later(String what, Object key, Runnable op) {
-        Tx.afterCommit(() -> {
+        Tx.submitCacheOperation(() -> {
             try {
                 op.run();
                 log.info("afterCommit: {} {}", what, key);

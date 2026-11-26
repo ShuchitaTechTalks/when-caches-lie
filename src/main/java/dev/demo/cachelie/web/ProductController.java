@@ -1,5 +1,6 @@
 package dev.demo.cachelie.web;
 
+import dev.demo.cachelie.domain.ProductDeleted;
 import dev.demo.cachelie.domain.ProductView;
 import dev.demo.cachelie.service.ProductOps;
 import java.util.Map;
@@ -26,7 +27,14 @@ public class ProductController {
     @GetMapping("/{mode}/products/{id}")
     public ProductView read(@PathVariable String mode, @PathVariable long id,
                             @RequestParam(defaultValue = "0") long delayMs) {
-        return pick(mode).read(id, delayMs);
+        ProductView view = pick(mode).read(id, delayMs);
+        if (view == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product " + id + " not found");
+        return view;
+    }
+
+    @DeleteMapping("/{mode}/products/{id}")
+    public ProductDeleted delete(@PathVariable String mode, @PathVariable long id) {
+        return pick(mode).delete(id);
     }
 
     @PutMapping("/{mode}/products/{id}")

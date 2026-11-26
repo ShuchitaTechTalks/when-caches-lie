@@ -4,7 +4,6 @@
 #   PHASE 1 (break only, no fixes):  chain, step1, break
 #   PHASE 2 (the fixes):             step2 [safe|event|aware|wrapper], step3 [same], step4, fix2 (runs event, aware, wrapper)
 #   ORDER IS NOT THE FIX:            order (cache-outer still breaks: nested), orderfix (nestedaware)
-#   EVICT-FIRST RACE:                evictrace [evict|evictlate]   (the writer holds its transaction open 10 s)
 set -u
 APP=${APP:-http://localhost:8090}
 say()   { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
@@ -85,11 +84,11 @@ race() {  # $1 = mode
 
 step3() {  # the remaining bug: delayed put. Optional mode: safe (default) | event | aware | wrapper
   local m=${1:-safe}
-  say "STEP 3  the delayed-put race on '$m' (a post-commit evict is not enough)"
+  say "STEP 3  the delayed-put race on '$m' (writing the cache after the commit is not enough)"
   reset; pause
   race "$m"
   echo "read again:"; get "$m" 1
-  bad ">> Postgres has price 200, Valkey keeps serving 100 until the TTL. Evicting after the commit cannot fix this."
+  bad ">> Postgres has price 200, Valkey keeps serving 100 until the TTL. Writing or evicting after the commit cannot fix this."
 }
 
 step4() {  # fix: version-guarded Lua check-and-set
@@ -98,7 +97,7 @@ step4() {  # fix: version-guarded Lua check-and-set
   race lua
   echo "read again:"; get lua 1
   good ">> The reader's late write carried version 0 and was rejected (STALE). Valkey holds version 1, price 200."
-  echo "(see the app log: 'reader CAS put ... -> STALE')"
+  echo "(see the app log: 'CAS put 1 version 0 -> STALE')"
 }
 
 ghost() {  # $1 = mode: warm the cache, run the failing update, then compare Postgres and Valkey
@@ -138,24 +137,6 @@ orderfix() {  # same callers, transactionAware() cache manager: the write waits 
   ghost nestedaware
   good ">> transactionAware() binds the cache write to the outermost commit, wherever it happens and in any proxy order."
 }
-evictrace() {  # $1 = evict (default) | evictlate. The writer keeps its transaction open 10 s; a reader runs inside it.
-  local m=${1:-evict} db v
-  say "EVICT RACE '$m': the writer evicts, then holds its transaction open 10 s; a reader runs in between"
-  reset; pause
-  echo "warm the cache:"; get "$m" 1
-  echo "writer: set price to 200 (returns after ~10 s)"
-  put "$m" 1 Keyboard 200 > /tmp/writer.$$ &
-  sleep 2
-  echo "reader, while the writer's transaction is open:"; get "$m" 1
-  wait; echo "writer returned: $(cat /tmp/writer.$$)"; rm -f /tmp/writer.$$
-  show
-  echo "read again:"; get "$m" 1
-  db=$(dc exec -T postgres psql -U demo -d demo -tAc "SELECT price FROM product WHERE id = 1;" | tr -d '\r')
-  v=$(vk GET products::1 | tr -d '\r')
-  if [[ "$v" == *"\"price\":$db,"* ]]; then good ">> in sync: the cache serves price $db"
-  else bad ">> OUT OF SYNC: Postgres has price $db, the cache serves ${v:-<empty>} until the TTL"; fi
-}
-
 case "${1:-}" in
   up) up ;;
   down) dc down -v ;;
@@ -170,7 +151,6 @@ case "${1:-}" in
   step4) step4 ;;
   order) order ;;
   orderfix) orderfix ;;
-  evictrace) evictrace "${2:-evict}" ;;
   all) PAUSE=${PAUSE:-1}; step1; pause; step2; pause; step3; pause; step4 ;;
-  *) sed -n '2,7p' "$0" ;;
+  *) sed -n '2,6p' "$0" ;;
 esac

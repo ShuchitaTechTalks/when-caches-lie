@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 0 1248 520" width="2496" height="1040" font-family="Calibri, 'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="in" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#E2E8F0"/></marker>
+    <marker id="out" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/></marker>
+    <marker id="err" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#FB7185"/></marker>
+  </defs>
+  <rect x="-24" width="1248" height="520" fill="#0F172A"/>
+
+  <!-- calling code -->
+  <rect x="0" y="215" width="180" height="120" rx="10" fill="#14532D" stroke="#34D399" stroke-width="2"/>
+  <text x="14" y="246" font-size="17" font-weight="700" fill="#FFFFFF">Calling code</text>
+  <text x="14" y="268" font-size="15" fill="#BBF7D0">ProductController</text>
+  <text x="14" y="296" font-size="12" font-family="Consolas, 'Courier New', monospace" fill="#BBF7D0">update(1, "Mouse",</text>
+  <text x="14" y="313" font-size="12" font-family="Consolas, 'Courier New', monospace" fill="#BBF7D0">       999)</text>
+
+  <!-- proxy (the generated subclass) -->
+  <rect x="215" y="10" width="740" height="440" rx="14" fill="#2A1E0A" stroke="#F59E0B" stroke-width="3"/>
+  <text x="235" y="42" font-size="20" font-weight="700" fill="#FBBF24">Proxy</text>
+  <text x="300" y="42" font-size="15" font-family="Consolas, 'Courier New', monospace" fill="#FDE68A">NaiveProductService$$SpringCGLIB$$0</text>
+  <text x="235" y="64" font-size="14" fill="#94A3B8">a generated subclass of NaiveProductService (Spring Boot uses CGLIB by default)</text>
+
+  <!-- outer layer: transaction -->
+  <rect x="250" y="84" width="670" height="344" rx="12" fill="#0C2A44" stroke="#38BDF8" stroke-width="2"/>
+  <text x="270" y="114" font-size="18" font-weight="700" fill="#FFFFFF">TransactionInterceptor  (outer layer)</text>
+  <text x="270" y="136" font-size="14" fill="#BAE6FD">begins the transaction, commits or rolls back at the end</text>
+
+  <!-- inner layer: cache -->
+  <rect x="295" y="158" width="580" height="250" rx="12" fill="#0B3B2E" stroke="#34D399" stroke-width="2"/>
+  <text x="315" y="188" font-size="18" font-weight="700" fill="#FFFFFF">CacheInterceptor  (inner layer)</text>
+  <text x="315" y="210" font-size="14" fill="#A7F3D0">@CachePut: stores the result after the method returns</text>
+
+  <!-- plain object -->
+  <rect x="340" y="236" width="490" height="150" rx="12" fill="#1E293B" stroke="#94A3B8" stroke-width="2"/>
+  <text x="360" y="268" font-size="18" font-weight="700" fill="#FFFFFF">Plain object: NaiveProductService</text>
+  <text x="360" y="296" font-size="15" fill="#CBD5E1">update(): sets the name and price</text>
+  <text x="360" y="320" font-size="15" fill="#CBD5E1">no SQL yet: Hibernate sends it at commit</text>
+
+  <!-- the call goes in -->
+  <line x1="182" y1="275" x2="334" y2="275" stroke="#E2E8F0" stroke-width="3" marker-end="url(#in)"/>
+  <!-- the result comes out -->
+  <line x1="334" y1="355" x2="258" y2="355" stroke="#94A3B8" stroke-width="3" marker-end="url(#out)"/>
+  <line x1="248" y1="355" x2="184" y2="355" stroke="#FB7185" stroke-width="3" stroke-dasharray="8 5" marker-end="url(#err)"/>
+  <text x="14" y="390" font-size="14" font-weight="700" fill="#FB7185">exception</text>
+  <text x="14" y="408" font-size="14" font-weight="700" fill="#FB7185">becomes HTTP 409</text>
+
+  <g font-size="14" font-weight="700" text-anchor="middle" fill="#0B1220">
+    <circle cx="250" cy="250" r="12" fill="#E2E8F0"/><text x="250" y="255">1</text>
+    <circle cx="295" cy="250" r="12" fill="#E2E8F0"/><text x="295" y="255">2</text>
+    <circle cx="340" cy="250" r="12" fill="#E2E8F0"/><text x="340" y="255">3</text>
+    <circle cx="295" cy="380" r="12" fill="#FBBF24"/><text x="295" y="385">4</text>
+    <circle cx="250" cy="380" r="12" fill="#FB7185"/><text x="250" y="385">5</text>
+  </g>
+
+  <!-- result -->
+  <rect x="985" y="165" width="215" height="150" rx="12" fill="#2B0F16" stroke="#FB7185" stroke-width="2"/>
+  <text x="1001" y="198" font-size="19" font-weight="700" fill="#FB7185">The ghost write</text>
+  <text x="1001" y="236" font-size="14" fill="#CBD5E1">Postgres rolled back:</text>
+  <text x="1001" y="258" font-size="16" font-family="Consolas, 'Courier New', monospace" fill="#FFFFFF">Keyboard 100</text>
+  <text x="1001" y="288" font-size="14" fill="#CBD5E1">Valkey still holds:</text>
+  <text x="1001" y="308" font-size="16" font-family="Consolas, 'Courier New', monospace" fill="#FFFFFF">Mouse 999</text>
+
+  <!-- steps -->
+  <g font-size="15" fill="#CBD5E1">
+    <text x="0" y="478"><tspan font-weight="700" fill="#E2E8F0">1</tspan> the call arrives and the transaction begins   <tspan font-weight="700" fill="#E2E8F0">2</tspan> it passes the cache layer   <tspan font-weight="700" fill="#E2E8F0">3</tspan> the real update() runs, no SQL yet</text>
+    <text x="0" y="502"><tspan font-weight="700" fill="#FBBF24">4</tspan> on the way out, @CachePut writes Mouse 999   <tspan font-weight="700" fill="#FB7185">5</tspan> the commit fails and the database rolls back, but the cache write stays</text>
+  </g>
+</svg>

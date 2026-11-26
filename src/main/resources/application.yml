@@ -17,5 +17,6 @@ spring:
 
 logging.level:
   org.springframework.orm.jpa.JpaTransactionManager: DEBUG
+  org.hibernate.SQL: DEBUG   # shows the UPDATE going out at commit, before any afterCommit cache work
   org.springframework.cache: TRACE # shows commit / rollback
   dev.demo: INFO

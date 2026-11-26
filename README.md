@@ -76,7 +76,7 @@ Bruno works directly on these files, so there is nothing to import or convert, a
 
 ### Use it
 
-1. **Pick a mode** in the environment dropdown (top right): `naive`, `safe`, `aware`, `nested`, `nestedaware` or `lua`. Each environment sets one variable, `mode`. The collection variable `baseUrl` is already set to `http://localhost:8090`.
+1. **Pick a mode** in the environment dropdown (top right): `naive`, `safe`, `aware`, `nested`, `nestedaware`, `lua` or `tombstone`. Each environment sets one variable, `mode`. The collection variable `baseUrl` is already set to `http://localhost:8090`.
 2. **Send a request:** click it in the sidebar, then click the arrow next to the URL (or press `Ctrl+Enter` / `Cmd+Enter`). The response shows on the right.
 3. **Start every demo with Reset** (request 1).
 4. **Switch the mode, not the URL.** To run the same steps against another implementation, pick another environment and send the same requests again.
@@ -115,7 +115,7 @@ Start the app with `--demo.aop.order=tx-outer` for demos 1–2, then restart it 
 | **3b. …until a caller owns the transaction** | | `cache-outer` | `nested` | 1, 3, 4, 5 | Out of sync again: cache **Mouse 999** |
 | **4. Fix: `transactionAware()` for that caller** | | `cache-outer` | `nestedaware` | 1, 3, 4, 5 | In sync |
 | **5. Break it: the stale-read race** | after slide 10 | `cache-outer` | `aware` | 1, then **6** and within 10 s **7** (two tabs), then 5 | Postgres **200**, cache **100** |
-| **6. Fix: Lua check-and-set** | after slide 11 | `cache-outer` | `lua` | same as demo 5 | Cache **200, version 1**; app log `reader CAS put 1 version 0 -> STALE` |
+| **6. Fix: Lua check-and-set** | after slide 11 | `cache-outer` | `lua` | same as demo 5 | Cache **200, version 1**; app log `CAS put 1 version 0 -> STALE` |
 
 To restart with the other proxy order, stop the app (`Ctrl+C`) and run:
 
@@ -129,6 +129,8 @@ Request 2 (**Proxy chain**) prints the real advisor chain of a bean, outermost f
 
 ## Which class has which fix
 
+For the step-by-step path of each request (controller → proxies → service → cache → database), see [docs/code-flow.md](docs/code-flow.md).
+
 Slide numbers refer to the talk deck (19-slide version).
 
 | Slide | Topic | Mode | Class | What it shows |
@@ -141,14 +143,94 @@ Slide numbers refer to the talk deck (19-slide version).
 | | Fix #2b: your own post-commit wrapper | `wrapper` | `service/aftercommit/WrapperProductService`, `service/support/AfterCommitCache` | A `Cache` decorator that defers put and evict to `afterCommit()`. |
 | 9 | Reordering the proxies is not the fix | `nested`, `nestedaware` | `service/nested/CheckoutService`, `CheckoutAwareService` | An outer `@Transactional` caller owns the commit, so the cache proxy order no longer helps; `transactionAware()` still does. |
 | 10 | Problem 2: stale reads | `aware` | `service/aftercommit/AwareProductService.read()` | The `delayMs` pause between the DB read and the `@Cacheable` put lets a newer write land first. |
-| 11–13 | Fix #3: version-guarded check-and-set | `lua` | `service/versioned/LuaProductService`, `src/main/resources/cas.lua` | Every cache write carries the row's `@Version`; the Lua script keeps the higher one and answers `STALE` to the older one. |
+| 11–13 | Fix #3: version-guarded check-and-set | `lua` | `service/versioned/LuaProductService`, `service/support/VersionedCache`, `src/main/resources/cas.lua` | Plain `@Cacheable`/`@CachePut` on `versionedCacheManager`. Every cache write carries the row's `@Version`; `VersionedCache` sends it through the Lua script, which keeps the higher one and answers `STALE` to the older one. |
 
 ### Also in the code (not shown in the talk)
 
 | Mode | Class | What it shows |
 |---|---|---|
-| `evict` | `service/evict/EvictFirstProductService` | `@CacheEvict(beforeInvocation = true)` plus a 10 s open transaction: a reader in that window re-caches the old row. |
-| `evictlate` | `service/evict/EvictAfterCommitProductService` | The same slow write, evicting in `afterCommit()` instead. |
+| `tombstone` | `service/versioned/TombstoneProductService`, `service/support/TombstoneCache`, `src/main/resources/tombstone/*.lua` | Versioned updates **and deletes** behind the standard Spring annotations. See [Extra: versioned delete with a tombstone](#extra-versioned-delete-with-a-tombstone). |
+
+---
+
+## Extra: versioned delete with a tombstone
+
+*Not shown in the talk. Full design: [docs/specs/delete-tombstone.md](docs/specs/delete-tombstone.md).*
+
+### The problem it solves
+
+The Lua fix (demo 6) keeps the cache moving forward **only while the stored version exists**. A delete removes the entry and its version. A slow reader that loaded the row *before* the delete then finds no version to compare against, and its old value wins: the deleted product is back in the cache.
+
+### The idea
+
+Keep the delete's version in a **separate key next to the value**, and let one Lua script compare every write against both.
+
+| Key | Holds | TTL |
+|---|---|---|
+| `tomb:{products:1}` | the cached product (`payload`) and its version (`ver`) | 10 minutes |
+| `tomb:{products:1}:deleted` | **the version the row had when it was deleted** | 1 hour (`demo.tombstone.ttl`) |
+
+Both keys share the hash tag `{products:1}`, so they live in the same hash slot and the script stays atomic, also in Valkey Cluster.
+
+| Operation | Rule (inside one Lua script) |
+|---|---|
+| Write at version `v` (writer after the commit, or a reader filling the cache) | Rejected as `DELETED` if `v <= tombstone`. Rejected as `STALE` if `v < cached version`. Otherwise written. **The same version can always refill**, for example after the value expired. |
+| Delete of a row at version `v` | Remove the value, set the tombstone to `v`. **A delete does not change the version.** |
+| Evict (no version available) | Remove only the payload; the stored version stays as a fence. |
+
+Assumptions: versions come from the database (`@Version`) and every update increases them; ids come from a sequence and are never reused.
+
+### How it plugs into Spring
+
+The service uses the standard annotations. All the logic lives in one custom `Cache`:
+
+| Annotation | What `TombstoneCache` does |
+|---|---|
+| `@Cacheable` on `read()` | A payload in the cache is a hit. On a miss, `read()` runs and its result is written through the script. A product that doesn't exist returns `404` and is not cached. |
+| `@CachePut` on `update()` | Version-guarded write of the new value. |
+| `@CachePut` on `delete()` | `delete()` returns `ProductDeleted(id, version)`; the cache sees it is a tombstone and runs the delete script. |
+| `@CacheEvict` | Removes only the payload, so the version still protects against older writes. |
+
+A delete uses `@CachePut`, not `@CacheEvict`, because an evict can't carry a version. The cache is wrapped in `TransactionAwareCacheDecorator`, so updates and deletes reach the cache only **after the commit**, and a rolled-back one never does.
+
+| Piece | Where |
+|---|---|
+| `TombstoneProductService` (mode `tombstone`) | `service/versioned/` |
+| `TombstoneCache` (the custom `Cache`) | `service/support/` |
+| `tombstoneCacheManager` | `config/CacheConfig` |
+| `put.lua`, `delete.lua` | `src/main/resources/tombstone/` |
+| `Versioned`, `Tombstone`, `ProductDeleted` | `domain/` |
+
+### Try it
+
+Start the app (any proxy order), then:
+
+```bash
+# 1. reset, then a slow reader (10 s) in the background
+curl -X POST http://localhost:8090/admin/reset
+curl "http://localhost:8090/tombstone/products/1?delayMs=10000" &
+
+# 2. within 10 s: delete product 1
+curl -X DELETE http://localhost:8090/tombstone/products/1
+
+# 3. after the reader returns: the product stays deleted
+curl -i http://localhost:8090/tombstone/products/1      # 404
+```
+
+The app log shows `tombstone delete 1 version 0 -> DELETED` for the delete, then `tombstone put 1 version 0 -> DELETED` for the slow reader's late write. In the Valkey viewer, `tomb:{products:1}:deleted` holds `0` and there is no `tomb:{products:1}`.
+
+In Bruno: select the `tombstone` environment and use **Reset**, **Slow reader**, **Delete product** and **Read again**.
+
+The same rules also cover updates: run **Slow reader**, then **Writer: price 200** within 10 s. The writer's version 1 is stored, and the reader's version 0 is rejected as `STALE`.
+
+### Limits
+
+- The tombstone must outlive your slowest reader; one hour is far above any realistic stall.
+- Only writes through the script are protected: no direct `SET` / `DEL` on these keys.
+- Every database write path must increase `@Version`. Bulk SQL that skips it breaks the comparison.
+- If Valkey can't be reached when the cache is written, the failure is logged as a warning and the request still succeeds (the database has already committed). The old value stays until its TTL.
+- After a Valkey failover or memory eviction, the newest version or tombstone can briefly be missing.
+- **Reset** re-inserts product 1 with the same id, which real code must never do. It's safe here only because Reset also empties Valkey.
 
 ---
 
@@ -171,7 +253,6 @@ Slide numbers refer to the talk deck (19-slide version).
 ./demo.sh step3 aware      # demo 5: the stale-read race
 ./demo.sh step4            # demo 6: the Lua fix
 
-./demo.sh evictrace evict  # extra: the evict-first race (evictlate for the fix)
 PAUSE=1 ./demo.sh step1    # wait for Enter between actions
 ```
 
@@ -187,6 +268,7 @@ PAUSE=1 ./demo.sh step1    # wait for Enter between actions
 | Demo 5 or 6 shows price 200 in the cache | The writer was sent after the slow reader finished. Reset, then send the writer within 10 s of the reader. |
 | `404` with `"path": "/%3Cmode%3E/products/1"` | The request URL contains the literal text `<mode>`. Use `{{mode}}` (double curly braces). |
 | `{{mode}}` is not filled in, or a 404 lists the valid modes | No Bruno environment is selected. Pick one in the environment dropdown. |
+| **Delete product** returns `405` | Deletes are only supported by the `tombstone` mode. Select the `tombstone` environment. |
 | The app won't start: port `8090` in use | Another copy of the app is running. Stop it, or start this one with `--server.port=<other port>`. |
 | Anything else | Send **Reset** and repeat the demo. |
 
@@ -208,20 +290,22 @@ cache-demo/
 ├── docker-compose.yml          Postgres, Valkey, Adminer, Redis Commander
 ├── demo.sh                     scripted version of the demos (bash + curl)
 ├── bruno/                      Bruno collection: requests + one environment per mode
+├── docs/code-flow.md           step-by-step request flow for every mode
+├── docs/specs/                 design notes (delete-tombstone.md)
 └── src/main/
     ├── java/dev/demo/cachelie/
     │   ├── config/             AopConfig (proxy order), CacheConfig (cache managers)
     │   ├── diagnostics/        ProxyChainReporter (/admin/chain)
-    │   ├── domain/             Product entity (unique name, @Version), ProductView
-    │   ├── web/                ProductController (/{mode}/products/{id}), AdminController (/admin/*)
+    │   ├── domain/             Product entity (unique name, @Version), ProductView, ProductDeleted, Versioned, Tombstone
+    │   ├── web/                ProductController (GET/PUT/DELETE /{mode}/products/{id}), AdminController (/admin/*)
     │   └── service/
     │       ├── naive/          the bug
     │       ├── aftercommit/    fixes that touch the cache after the commit
     │       ├── nested/         proxy order is not the fix
-    │       ├── versioned/      Lua check-and-set
-    │       ├── evict/          extra: the evict-first race
-    │       └── support/        Tx, AfterCommitCache, ManualRead
+    │       ├── versioned/      Lua check-and-set, and the tombstone mode
+    │       └── support/        Tx, AfterCommitCache, ManualRead, VersionedCache, TombstoneCache
     └── resources/
         ├── application.yml
-        └── cas.lua             the version-guarded check-and-set
+        ├── cas.lua             the version-guarded check-and-set
+        └── tombstone/          put.lua and delete.lua for the tombstone mode
 ```

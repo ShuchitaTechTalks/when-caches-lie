@@ -7,7 +7,7 @@ public final class Tx {
     private Tx() { }
 
     /** Runs the action only after the DB commit succeeded. A rollback never runs it. */
-    public static void afterCommit(Runnable action) {
+    public static void submitCacheOperation(Runnable action) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             action.run();
             return;

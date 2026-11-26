@@ -1,0 +1,5 @@
+name: tombstone
+variables:
+  - name: mode
+    value: tombstone
+    description: ""

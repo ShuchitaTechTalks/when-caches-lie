@@ -12,7 +12,7 @@ import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** STEP 2: evict only after the commit succeeded. Fixes the ghost, but not the delayed-put race (STEP 3). */
+/** STEP 2: put the new value only after the commit succeeded. Fixes the ghost, but not the delayed-put race (STEP 3). */
 @Service("safe")
 public class SafeProductService implements ProductOps {
     private static final Logger log = LoggerFactory.getLogger("demo.safe");
@@ -44,7 +44,8 @@ public class SafeProductService implements ProductOps {
         Product p = repo.findById(id).orElseThrow();
         p.setName(name);
         p.setPrice(price);
-        Tx.afterCommit(() -> { cache().evict(id); log.info("afterCommit: evicted {}", id); });
-        return new ProductView(id, name, price, p.getVersion() + 1);
+        ProductView view = new ProductView(id, name, price, p.getVersion() + 1);
+        Tx.submitCacheOperation(() -> { cache().put(id, view); log.info("afterCommit: put {} (price {}) into the cache", id, view.price()); });
+        return view;
     }
 }
